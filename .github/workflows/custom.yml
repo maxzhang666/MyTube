@@ -18,6 +18,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        service: [backend, frontend]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,48 +39,32 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
-        id: meta-backend
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
           tags: |
             type=raw,value=latest
 
-      - name: Build and push Backend image
+      - name: Build and push ${{ matrix.service }} image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./backend/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          context: ${{ matrix.service == 'backend' && '.' || './frontend' }}
+          file: ${{ matrix.service == 'backend' && './backend/Dockerfile' || './frontend/Dockerfile' }}
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for Frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
-          tags: |
-            type=raw,value=latest
-
-      - name: Build and push Frontend image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          file: ./frontend/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            VITE_API_URL=http://localhost:5551/api
-            VITE_BACKEND_URL=http://localhost:5551
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ matrix.service == 'frontend' && 'VITE_API_URL=http://localhost:5551/api' || '' }}
+            ${{ matrix.service == 'frontend' && 'VITE_BACKEND_URL=http://localhost:5551' || '' }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
+  summary:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
       - name: Summary
         run: |
           echo "✅ Successfully built and pushed images to GitHub Container Registry!"
